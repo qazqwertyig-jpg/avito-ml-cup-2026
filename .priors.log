@@ -1,0 +1,24 @@
+1239391 val item IDs, mapping 111319522 slots
+512 train shards
+aggregated 32/512 shards, 190s, 3.1 MiB/s
+aggregated 64/512 shards, 190s, 6.1 MiB/s
+aggregated 96/512 shards, 191s, 9.1 MiB/s
+aggregated 128/512 shards, 191s, 12.1 MiB/s
+aggregated 160/512 shards, 209s, 13.9 MiB/s
+aggregated 192/512 shards, 209s, 16.6 MiB/s
+aggregated 224/512 shards, 286s, 14.2 MiB/s
+aggregated 256/512 shards, 321s, 14.4 MiB/s
+aggregated 288/512 shards, 322s, 16.2 MiB/s
+aggregated 320/512 shards, 350s, 16.5 MiB/s
+aggregated 352/512 shards, 350s, 18.2 MiB/s
+aggregated 384/512 shards, 351s, 19.8 MiB/s
+aggregated 416/512 shards, 351s, 21.4 MiB/s
+aggregated 448/512 shards, 401s, 20.2 MiB/s
+aggregated 480/512 shards, 402s, 21.6 MiB/s
+aggregated 512/512 shards, 402s, 23.1 MiB/s
+{
+  "val": {
+    "rows": 1389971,
+    "item_seen_fraction": 0.6543366732111677
+  }
+}

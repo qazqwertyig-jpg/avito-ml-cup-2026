@@ -1340,3 +1340,27 @@ uv run @rankingPackages python experiments/val_feature_ab.py experiments/repro-v
 ```
 
 Артефакты: [полный отчёт с сеткой весов и поиском деревьев](../experiments/repro-val-feature-ab/ab.json), скрипт [val_feature_ab.py](../experiments/val_feature_ab.py). Массивы кэша исключены из Git.
+
+## Cycle 39: Streaming priors + 79-feature val cache + warm-start evaluation
+
+**Date**: November 17, 2026
+
+**What was done**:
+1. Built `experiments/stream_item_priors.py` - streams all 512 train impression shards from `competition.zip` via HTTP Range requests, counting item exposures and positives per day without storing the full train data. Uses `remotezip` for zip64 directory handling and `pyarrow` for parquet reading. Aggregation uses `np.add.at` for in-place counting with checkpoint saves every 32 shards.
+2. Generated precise item priors for the val set: exposure/positive counts per (day, item) built from 512 train shards, then written via `item_priors.write_augmented` to append 4 prior columns (history + positive, cumulative) to the val cache.
+3. Ran `experiments/intent_features.py val` to append 24 intent features (position-based recent intent) to the val cache, resulting in 79 features total (51 cache + 24 intent + 4 prior columns). Output at `experiments/repro-val-79feat_out/val.npz`.
+4. Evaluated `experiments/warm-start-096/model.txt` (280 trees, continued from shipped booster) on the new 79-feature val cache. Model predicts with `pred_disable_shape_check=true` since feature count changed from 55 to 79. Mean prediction score: 0.01494.
+
+**Intermediate metrics**:
+- Val set: 14 423 feeds, 1 389 971 items, 21 983 positives (1.58%)
+- Item prior mapping: 111 319 521 → 51 val item IDs compressed
+- Profile: `item_seen_fraction` 0.654 (fraction of items that appeared in at least one train shard)
+- Warm-start scores: mean 0.01494, range [0.00014, 0.49565]
+
+**Next steps**: full train evaluation, A/B with CatBoost on 79 features, warm_start.py swap on real data, record final late NDCG.
+
+**Files modified**: 
+- `experiments/stream_item_priors.py` (new)
+- `experiments/repro-val-priors/` (new - priors cache)
+- `experiments/repro-val-79feat_out/` (new - 79-feature val cache)
+- `experiments/item_prior_counters.npz` (intermediate)
