@@ -24,10 +24,11 @@
 Ссылки на такие файлы в историческом журнале обозначают локальные пути:
 на GitHub они не откроются. JSON с метриками и проверками доступен в репозитории.
 
-Получить исходный датасет нужно через страницу соревнования, указанную в
-[описании задачи](HACKATHON.md), и распаковать в `competition/`, сохранив
-`train/`, `val/`, `test/` и `sample_submission.parquet`.
-Формат описан в [официальном README данных](../competition/readme.md).
+Скачайте `competition.zip` (19,2 ГБ) из раздела [«Данные для участников» на ODS](https://ods.ai/competitions/avitotechrecsys2026/dataset).
+Распакуйте архив в корень клона. Проверьте, что `train/`, `val/`, `test/`
+и `sample_submission.parquet` лежат непосредственно в `competition/`, без
+дополнительного уровня вложенности. Каждый сплит содержит `impressions/`
+и `item_embeddings/`. Формат описан в [README данных](../competition/readme.md).
 
 Файл [LOCAL_ARTIFACTS.csv](LOCAL_ARTIFACTS.csv) перечисляет исключённые массивы,
 прогнозы и шаблоны сабмитов с относительными путями и размерами на момент
