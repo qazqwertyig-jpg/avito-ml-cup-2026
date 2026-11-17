@@ -144,6 +144,8 @@
 | `transition-probe-024` | [comparison.json](transition-probe-024/comparison.json) | 0 | 1 |
 | `user-response-profile-fit` | [profile_audit.json](user-response-profile-fit/profile_audit.json) | 0 | 1 |
 | `user-response-profile-val` | [assessment.json](user-response-profile-val/assessment.json), [early_search.json](user-response-profile-val/early_search.json) | 0 | 0 |
+| `warm-start-096` | [metrics.json](warm-start-096/metrics.json) | 1 | 1 |
+| `warm-start-096-assessment` | [assessment.json](warm-start-096-assessment/assessment.json) | 0 | 1 |
 | `wide-rank-assessment-192` | [assessment.json](wide-rank-assessment-192/assessment.json), [early_selection.json](wide-rank-assessment-192/early_selection.json) | 0 | 4 |
 | `wide-rank-data` | [prepare.json](wide-rank-data/prepare.json) | 0 | 192 |
 | `wide-rank-finetune-192` | [progress.json](wide-rank-finetune-192/progress.json), [tune.json](wide-rank-finetune-192/tune.json) | 2 | 2 |

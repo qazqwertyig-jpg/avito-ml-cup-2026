@@ -1268,3 +1268,50 @@ $env:OPENBLAS_NUM_THREADS = '1'
 & $sequencePython -B -u experiments/causal_exposure.py experiments/repro-causal-exposure-valtest
 ```
 
+## Тридцать шестой цикл. Продолжение бустинга на втором блоке шардов
+
+**Состояние.** Последний загруженный файл `transformer10-submission` получил Public `0.36487042` и уступил `nn-calibration-joint-024` на `0.0003435318`. Лучший подтверждённый Public остаётся `0.3652139518` при позднем val `0.3729571873`. Этот цикл проверяет не новый сигнал, а более полное использование уже обученной сильнейшей модели деревьев: продолжение `lgb-binary-intent-048` на 48 шардах, не встречавшихся при её обучении (`experiments/cache-intent-096`, seed `2027`, 295 247 лент, 23 119 839 кандидатов). Первые 160 деревьев заморожены, добавленные обучаются теми же параметрами и seed, число деревьев выбирается по полному NDCG раннего val, поздний val открывается один раз. Массивы, прогнозы и чекпойнты исключены из Git; в репозитории сохранены [параметры и лог](../experiments/warm-start-096/metrics.json), [модель](../experiments/warm-start-096/model.txt) и [сравнение](../experiments/warm-start-096-assessment/assessment.json).
+
+**Измерено.** Лучшая точка — 120 добавленных деревьев из 160, `280` всего. Одиночная модель дала ранний NDCG `0.373398` и поздний `0.369146` против `0.372035` и `0.368395` у источника, то есть продолжила его на обоих блоках. Смесь с отправленным ансамблем выбиралась по двум ранним блокам и на сетке `0.025…0.50` остановилась на `0.05`: поздний прирост `+0.000133` при интервале `[-0.000087, +0.000390]`, но первый ранний блок `-0.0000955`. По принятому правилу вес не допущен, новый Parquet не создавался. [Полный перебор весов](../experiments/warm-start-096-assessment/assessment.json).
+
+**Не проверенная постановка.** Добавление 5% поверх ансамбля тратит преимущество продолжения на почти ортогональную компоненту: при весе `0.2` внутри ансамбля деревьев модель-источник входит в те же стандартизованные scores. Поэтому следующая проверка — **подстановка**: пересобрать `lgb-ensemble-weighted-intent-048` с `warm-start-096` вместо `lgb-binary-intent-048` и прежними весами. Контроль известен: поздний `0.368731`, `NDCG@10` `0.240497`, `NDCG@30` `0.310109`. Возможный прирост ограничен весом компонента `0.2` и корреляцией с источником, поэтому ожидать `+0.001` здесь нельзя; смысл проверки в том, что подстановка не меняет состав и веса, а только заменяет компонент строго доминирующей моделью.
+
+```powershell
+$rankingPackages = @('--no-project', '--python', '3.11', '--with', 'numpy==1.26.4', '--with', 'polars==1.14.0', '--with', 'pyarrow==19.0.1', '--with', 'lightgbm==4.6.0')
+uv run @rankingPackages python experiments/warm_start.py swap experiments/cache-intent-024 experiments/repro-warm-start-substitution `
+  experiments/lgb-xendcg-intent-024 experiments/lgb-xendcg-priors-024 experiments/lgb-debiased-024 `
+  experiments/lgb-binary-intent-024 experiments/lgb-binary-priors-024 experiments/lgb-xendcg-intent-048 `
+  --weights .12 .12 .12 .12 .12 .2 `
+  --replace experiments/lgb-binary-intent-048 --replacement experiments/warm-start-096
+```
+
+Команда пишет `swap.json` с приростами по двум ранним блокам, обеим поздним половинам, длинам лент и парным интервалом. Принятое правило: положительный прирост в обоих ранних блоках и обеих поздних половинах, поздний прирост не меньше `+0.001` либо положительная нижняя граница интервала. Только после этого имеет смысл пересобирать цепочку калибровок (`nn-calibration-extra` → `nn-calibration-stratified` → `nn-calibration-joint`) на новых прогнозах ансамбля деревьев. Если подстановка нейтральна, следующий дешёвый шаг той же линии — продолжить на блоке `2027` второй компонент на 48 частях, `lgb-xendcg-intent-048`, и повторить подстановку.
+
+Сам `swap` в этом цикле не запускался: в репозитории нет датасета, кэшей `val.npz` и прогнозов компонентов. Тесты `experiments/test_warm_start.py` дополнены проверками нормализации весов, отказа при отрицательном весе и правила допуска; они проходят без LightGBM.
+## Тридцать седьмой цикл. CatBoost как отдельное семейство деревьев
+
+**Почему это новое.** Все деревья в отправленном ансамбле — LightGBM. CatBoost в проекте не обучался ни разу: в локальном Python его не было (`PUBLISH_CHECK.md`), и проверки в циклах 28–30 запускались без него. Симметричные деревья, упорядоченные статистики категорий и другой поиск разбиений дают ошибки, слабо коррелирующие с LightGBM, — это самый дешёвый оставшийся источник разнообразия при тех же 79 признаках и том же train-кэше.
+
+**Протокол до метрик.** Вход — существующий кэш (`x`, `target`, `counts`) и та же нарезка признаков `history-intent`, поэтому ни один признак не пересчитывается. Параметры и seed фиксированы: `Logloss`, глубина `8`, `lr 0.1`, `l2_leaf_reg 3`, `border_count 127`, Bernoulli-бутстрэп `0.9`, seed `2026`. Число деревьев выбирается по полному NDCG раннего val с шагом `200` (`--checkpoint`), поздний val открывается один раз для выбранной точки. Категориальные колонки (`category`, `intent_match_type`, `intent_match_source`) по умолчанию входят как числовые коды: массив кэша имеет `float32`, а CatBoost требует для категорий целочисленные колонки. Флаг `--categoricals` собирает `DataFrame` с `int32` в этих трёх колонках и включает обработку категорий, но требует копию матрицы (примерно +7,5 ГиБ на 48 частях).
+
+Порядок проверки: сначала дешёвый прогон на готовой подвыборке `experiments/feed-width-048/random.npz` (3 575 775 строк, 295 376 лент), затем полные 48 частей. Вес смеси с отправленным ансамблем выбирается на двух ранних блоках (`warm_start.py assess`, сетка `0.025…0.5`); для тестового файла используется `neural_blend.py predict`, который смешивает уже готовые score-файлы. Критерий прежний: `+0.003` позднего NDCG, либо от `+0.001` с положительной нижней границей парного интервала и ростом в обеих ранних частях и обеих поздних половинах. `select` перебирает свою сетку `0.15…1.0` на первых ранних 3 749 лентах; решает более тонкая сетка `assess` на двух ранних блоках, и в `comparison.json` перед `predict` подставляются именно выбранные там веса (`weights`, `normalization: zscore`), иначе тестовый файл соберётся с другим весом, чем проверенный.
+
+```powershell
+$rankingPackages = @('--no-project', '--python', '3.11', '--with', 'numpy==1.26.4', '--with', 'polars==1.14.0', '--with', 'pyarrow==19.0.1', '--with', 'lightgbm==4.6.0', '--with', 'catboost==1.2.10')
+# 1. Дешёвый прогон на подвыборке строк.
+uv run @rankingPackages python experiments/catboost_ranker.py train experiments/cache-intent-024 experiments/repro-catboost-random-048 `
+  --train-file experiments/feed-width-048/random.npz --rounds 800 --checkpoint 200 --threads 6
+# 2. Полные 48 частей, только если первый прогон дал ненулевой вес.
+uv run @rankingPackages python experiments/catboost_ranker.py train experiments/cache-intent-024 experiments/repro-catboost-048 --rounds 800 --checkpoint 200 --threads 6
+# 3. Вес смеси по двум ранним блокам и парный интервал.
+uv run @rankingPackages python experiments/warm_start.py assess experiments/repro-catboost-048 experiments/nn-calibration-joint-024/val_predictions.parquet experiments/repro-catboost-weight
+# 4. Тестовые прогнозы члена и итоговая смесь, если вес допущен.
+uv run @rankingPackages python experiments/catboost_ranker.py predict experiments/cache-intent-024 experiments/repro-catboost-048/model.cbm experiments/repro-catboost-048/test_predictions.parquet
+uv run @rankingPackages python experiments/neural_blend.py select experiments/cache-intent-024 experiments/repro-catboost-blend --baselines experiments/nn-calibration-joint-024 --neural experiments/repro-catboost-048
+uv run @rankingPackages python experiments/neural_blend.py predict experiments/cache-intent-024 experiments/repro-catboost-blend/comparison.json submission-catboost.parquet experiments/nn-calibration-joint-024/submission-reserve.parquet experiments/repro-catboost-048/test_predictions.parquet
+uv run @rankingPackages python experiments/ranking.py audit submission-catboost.parquet
+```
+
+**Что проверено, а что нет.** Код `experiments/catboost_ranker.py` прогнан сквозным образом на синтетическом кэше (3 000 обучающих и 6 000 val-лент, 79 признаков, обе ветки — с категориями и без): обучение, выбор контрольной точки, `model.cbm`, val-прогнозы, `metrics.json`, тестовый прогноз и `ranking.py audit` с нулём ничьих. Юнит-тесты `experiments/test_catboost_ranker.py` проверяют нарезку признаков, индексы категорий, отказ при узком кэше и правило выбора контрольной точки; они проходят без установленного CatBoost. Реальные метрики NDCG не считались: в репозитории нет датасета, кэшей и прогнозов. Ожидаемый порядок величины для члена с весом около `0.05…0.2` — `+0.0005…+0.0015` позднего NDCG, то есть попытка Public оправдана только при выполнении общего критерия.
+
+**Время и память.** Матрица 48 частей — 23,1 млн строк и 7,5 ГиБ в `float32`; CatBoost на шести потоках заметно медленнее LightGBM на то же число итераций, поэтому первый прогон делается на подвыборке. `--train-file` принимает любой кэш той же схемы, так что повтор эксперимента воспроизводим без пересчёта признаков.

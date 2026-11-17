@@ -12,9 +12,16 @@ Protocol, fixed before any late metric is computed:
 * a blend with the shipped ensemble is chosen by the minimum gain over two early blocks;
 * the late val is reported once, after both choices are frozen.
 
+The continuation also dominates its parent booster on both early blocks, so the second
+placement tested here is substitution: rebuild the shipped tree ensemble with the
+continued booster in place of the one it continues, keeping every weight unchanged.
+That comparison can only be measured where the cached val and the component
+predictions live.
+
 Usage:
     python experiments/warm_start.py run <cache> <init-model> <out>
     python experiments/warm_start.py assess <run-dir> <reference-val-parquet> <out>
+    python experiments/warm_start.py swap <val-cache> <out> --replace <run> --replacement <run> runs... --weights ...
 """
 import argparse
 import hashlib
@@ -91,6 +98,31 @@ def standardize(score, counts):
     centered = score - np.repeat(np.add.reduceat(score, starts) / counts, counts)
     spread = np.sqrt(np.add.reduceat(centered ** 2, starts) / counts)
     return centered / np.repeat(np.maximum(spread, 1e-8), counts)
+
+
+def blend_scores(components, weights):
+    """Average per-feed standardized components with the given positive weights."""
+    weights = np.asarray(weights, dtype=np.float64)
+    if weights.shape != (len(components),) or not np.isfinite(weights).all():
+        raise ValueError('give one finite weight per component')
+    if np.any(weights < 0) or weights.sum() <= 0:
+        raise ValueError('weights must be nonnegative with a positive sum')
+    total = np.zeros(len(components[0]), dtype=np.float64)
+    for component, weight in zip(components, weights, strict=True):
+        if len(component) != len(total):
+            raise ValueError('components must share one candidate alignment')
+        total += weight * component
+    return total / weights.sum()
+
+
+def swap_verdict(block_gains, late_gains, late_delta, interval, target=0.001):
+    """Apply the journal rule: both early blocks, both late halves, and a real gain."""
+    minimum = float(min(block_gains))
+    halves = [float(gain) for gain in late_gains]
+    accepted = bool(minimum > 0 and min(halves) > 0
+                    and (late_delta >= target or (late_delta > 0 and interval[0] > 0)))
+    return {'minimum_block_gain': minimum, 'minimum_late_half_gain': min(halves),
+            'late_delta': float(late_delta), 'target': float(target), 'accepted': accepted}
 
 
 def fit(args):
@@ -215,6 +247,79 @@ def assess(args):
                      indent=2), flush=True)
 
 
+def swap(args):
+    import polars as pl
+
+    from ranking import KEYS
+
+    with np.load(args.cache / 'val.npz') as handle:
+        val = dict(handle)
+    counts, targets = val['counts'], val['target']
+    keys = prediction_frame(val, np.zeros(len(val['item']))).select(KEYS)
+    paths = [Path(path) for path in args.runs]
+    if len(paths) != len(args.weights):
+        raise ValueError('give one weight per component')
+    if args.replace not in paths:
+        raise ValueError('the replaced component is not part of the blend')
+    weights = np.asarray(args.weights, dtype=np.float64)
+    if weights.shape != (len(paths),) or not np.isfinite(weights).all() or np.any(weights < 0):
+        raise ValueError('weights must be finite and nonnegative')
+
+    def read(run):
+        frame = pl.read_parquet(Path(run) / 'val_predictions.parquet')
+        if not frame.select(KEYS).equals(keys):
+            raise ValueError(f'misaligned candidate keys for {run}')
+        score = frame['score'].to_numpy().astype(np.float64)
+        if not np.isfinite(score).all():
+            raise ValueError(f'nonfinite scores for {run}')
+        return standardize(score, counts)
+
+    originals = [read(path) for path in paths]
+    components = list(originals)
+    components[paths.index(args.replace)] = read(args.replacement)
+    baseline = blend_scores(originals, weights)
+    candidate = blend_scores(components, weights)
+
+    boundary = temporal_boundary(val['timestamp'], .4)
+    early_rows = int(counts[:boundary].sum(dtype=np.int64))
+    late_feeds = slice(boundary, len(counts))
+    late_rows = slice(early_rows, len(targets))
+    middle = boundary + (len(counts) - boundary) // 2
+    middle_row = int(counts[:middle].sum(dtype=np.int64))
+
+    def gain(rows, feeds):
+        return float(per_feed_ndcg(targets[rows], candidate[rows], counts[feeds]).mean()
+                     - per_feed_ndcg(targets[rows], baseline[rows], counts[feeds]).mean())
+
+    block_gains = [gain(rows, feeds) for rows, feeds in block_slices(counts)]
+    late_gains = [gain(slice(late_rows.start, middle_row), slice(boundary, middle)),
+                  gain(slice(middle_row, late_rows.stop), slice(middle, len(counts)))]
+    late_delta = gain(late_rows, late_feeds)
+    interval = paired_bootstrap(baseline, candidate, counts, targets, late_rows, late_feeds)
+    per_feed = (per_feed_ndcg(targets[late_rows], candidate[late_rows], counts[late_feeds])
+                - per_feed_ndcg(targets[late_rows], baseline[late_rows], counts[late_feeds]))
+    late_sizes = counts[late_feeds]
+    size_gains = {f'{lo}-{hi}': (float(per_feed[(late_sizes >= lo) & (late_sizes <= hi)].mean())
+                                 if ((late_sizes >= lo) & (late_sizes <= hi)).any() else None)
+                  for lo, hi in ((5, 30), (31, 100), (101, 300))}
+    verdict = swap_verdict(block_gains, late_gains, late_delta, interval['interval'])
+    report = {'cache': str(args.cache), 'components': [str(path) for path in paths],
+              'weights': (weights / weights.sum()).tolist(),
+              'replaced': str(args.replace), 'replacement': str(args.replacement),
+              'block_gains': block_gains, 'late_half_gains': late_gains,
+              'late_delta': late_delta, 'late_interval': interval['interval'],
+              'late_gain_by_size': size_gains,
+              'baseline': evaluate(val, baseline, boundary),
+              'candidate': evaluate(val, candidate, boundary), 'verdict': verdict,
+              'early_feeds': boundary, 'late_feeds': len(counts) - boundary,
+              'late_start_timestamp': int(val['timestamp'][boundary])}
+    args.out.mkdir(parents=True, exist_ok=False)
+    prediction_frame(val, candidate).write_parquet(args.out / 'val_predictions.parquet')
+    (args.out / 'swap.json').write_text(json.dumps(report, indent=2) + '\n')
+    print(json.dumps({key: report[key] for key in ('verdict', 'late_half_gains', 'late_gain_by_size',
+                                                   'candidate')}, indent=2), flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     subs = parser.add_subparsers(dest='action', required=True)
@@ -233,11 +338,20 @@ def main():
     assess_parser.add_argument('reference', type=Path)
     assess_parser.add_argument('out', type=Path)
     assess_parser.add_argument('--val-cache', type=Path, default=Path('experiments/cache-intent-024'))
+    swap_parser = subs.add_parser('swap')
+    swap_parser.add_argument('cache', type=Path)
+    swap_parser.add_argument('out', type=Path)
+    swap_parser.add_argument('runs', type=Path, nargs='+')
+    swap_parser.add_argument('--weights', type=float, nargs='+', required=True)
+    swap_parser.add_argument('--replace', type=Path, required=True)
+    swap_parser.add_argument('--replacement', type=Path, required=True)
     args = parser.parse_args()
     if args.action == 'run':
         fit(args)
-    else:
+    elif args.action == 'assess':
         assess(args)
+    else:
+        swap(args)
 
 
 if __name__ == '__main__':

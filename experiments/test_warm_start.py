@@ -44,5 +44,37 @@ class SelectWeightTest(unittest.TestCase):
         self.assertTrue(np.all(result[2:] == 0.0))
 
 
+class BlendScoresTest(unittest.TestCase):
+    def test_weights_are_normalized_to_a_single_average(self):
+        components = [np.array([2.0, 0.0]), np.array([0.0, 4.0])]
+        result = warm_start.blend_scores(components, [1.0, 3.0])
+        np.testing.assert_allclose(result, [0.5, 3.0])
+
+    def test_negative_weight_is_rejected(self):
+        with self.assertRaises(ValueError):
+            warm_start.blend_scores([np.zeros(2), np.zeros(2)], [1.0, -1.0])
+
+    def test_misaligned_components_are_rejected(self):
+        with self.assertRaises(ValueError):
+            warm_start.blend_scores([np.zeros(2), np.zeros(3)], [1.0, 1.0])
+
+
+class SwapVerdictTest(unittest.TestCase):
+    def test_negative_early_block_rejects_any_late_gain(self):
+        verdict = warm_start.swap_verdict([-0.0001, 0.0002], [0.0004, 0.0005], 0.0002, [0.0001, 0.0003])
+        self.assertFalse(verdict['accepted'])
+        self.assertAlmostEqual(verdict['minimum_block_gain'], -0.0001)
+
+    def test_target_gain_with_positive_blocks_is_accepted(self):
+        verdict = warm_start.swap_verdict([0.0004, 0.0003], [0.0009, 0.0011], 0.0012, [0.0006, 0.0018])
+        self.assertTrue(verdict['accepted'])
+
+    def test_smaller_gain_needs_a_positive_interval_bound(self):
+        accepted = warm_start.swap_verdict([0.0002, 0.0001], [0.0003, 0.0002], 0.0003, [0.0001, 0.0005])
+        self.assertTrue(accepted['accepted'])
+        rejected = warm_start.swap_verdict([0.0002, 0.0001], [0.0003, 0.0002], 0.0003, [-0.0001, 0.0005])
+        self.assertFalse(rejected['accepted'])
+
+
 if __name__ == '__main__':
     unittest.main()
