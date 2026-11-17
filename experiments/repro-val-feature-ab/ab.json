@@ -1,0 +1,126 @@
+{
+  "scope": "single public val cache; train block is early val, so absolute NDCG is not comparable with runs trained on train",
+  "cache": "experiments/repro-val-cache",
+  "features": [
+    "f1",
+    "f2",
+    "f3",
+    "f4",
+    "f5",
+    "category",
+    "user_dot",
+    "user_cos",
+    "item_missing",
+    "f1_rank",
+    "f1_z",
+    "f2_rank",
+    "f2_z",
+    "f3_rank",
+    "f3_z",
+    "f4_rank",
+    "f4_z",
+    "f5_rank",
+    "f5_z",
+    "user_cos_rank",
+    "user_cos_z",
+    "feed_size",
+    "category_count",
+    "user_norm",
+    "item_norm",
+    "hist_category_8",
+    "hist_category_32",
+    "hist_category_256",
+    "hist_event_1_category",
+    "hist_event_2_category",
+    "hist_event_3_category",
+    "hist_event_4_category",
+    "hist_event_5_category",
+    "hist_event_6_category",
+    "hist_event_7_category",
+    "hist_event_8_category",
+    "hist_event_9_category",
+    "hist_event_10_category",
+    "hist_length",
+    "hist_valid",
+    "hist_same_item",
+    "hist_first_category",
+    "hist_cos_max",
+    "hist_cos_top3",
+    "hist_cos_mean",
+    "hist_cos_recent8",
+    "hist_cos_recent32",
+    "hist_cos_category_max",
+    "hist_cos_category_mean",
+    "hist_cos_early_late",
+    "hist_cos_max_rank"
+  ],
+  "feature_count": 51,
+  "blocks": {
+    "train_feeds": 5766,
+    "tune_feeds": 4328,
+    "test_feeds": 4329,
+    "train_rows": 544950,
+    "tune_rows": 428207,
+    "test_rows": 416814
+  },
+  "selected_trees": {
+    "lightgbm": 40,
+    "catboost": 100
+  },
+  "tune_search": {
+    "lightgbm": {
+      "40": 0.3556038362821244,
+      "80": 0.35185802469543287,
+      "120": 0.35006364733683537,
+      "160": 0.34923160488693483
+    },
+    "catboost": {
+      "100": 0.352388685169197,
+      "200": 0.35063959556123847,
+      "300": 0.34924403810983573,
+      "400": 0.3480758845130092
+    }
+  },
+  "tune": {
+    "lightgbm": 0.3556038362821244,
+    "catboost": 0.352388685169197,
+    "blend": 0.3566605373421197
+  },
+  "test": {
+    "lightgbm": 0.3608140296345772,
+    "catboost": 0.3630731457963354,
+    "blend": 0.36384213738992965,
+    "catboost_minus_lightgbm": 0.002259116161758168,
+    "blend_minus_lightgbm": 0.0030281077553524494
+  },
+  "blend_grid": [
+    {
+      "weight": 0.05,
+      "tune_ndcg": 0.3564108782644773
+    },
+    {
+      "weight": 0.1,
+      "tune_ndcg": 0.3563121401432024
+    },
+    {
+      "weight": 0.2,
+      "tune_ndcg": 0.3566605373421197
+    },
+    {
+      "weight": 0.3,
+      "tune_ndcg": 0.3562947523408079
+    },
+    {
+      "weight": 0.5,
+      "tune_ndcg": 0.35509639294725104
+    }
+  ],
+  "chosen_weight": 0.2,
+  "test_blend_minus_lightgbm": {
+    "delta": 0.0030280080487001134,
+    "interval": [
+      0.0005762039669247772,
+      0.005436560412744477
+    ]
+  }
+}
